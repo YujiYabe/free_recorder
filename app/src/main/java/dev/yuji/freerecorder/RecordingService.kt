@@ -30,7 +30,25 @@ class RecordingService : Service() {
     private var outputFile: File? = null
     private var outputDescriptor: ParcelFileDescriptor? = null
     private val handler = Handler(Looper.getMainLooper())
-    private val segmentRotation = Runnable { rotateRecordingSegment() }
+    private var segmentStartMillis = 0L
+    private val silenceCheckRunnable = object : Runnable {
+        override fun run() {
+            if (!isRecording) return
+            val elapsed = System.currentTimeMillis() - segmentStartMillis
+            // MAX_SEGMENT_DURATION に達したら強制ローテーション
+            if (elapsed >= MAX_SEGMENT_DURATION_MILLIS) {
+                rotateRecordingSegment()
+                return
+            }
+            // MIN_SEGMENT_DURATION 経過後、無音ならローテーション
+            val amplitude = recorder?.maxAmplitude ?: 0
+            if (amplitude <= SILENCE_AMPLITUDE_THRESHOLD) {
+                rotateRecordingSegment()
+                return
+            }
+            handler.postDelayed(this, SILENCE_CHECK_INTERVAL_MILLIS)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -48,7 +66,7 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(segmentRotation)
+        handler.removeCallbacks(silenceCheckRunnable)
         if (isRecording) {
             stopRecording()
         }
@@ -116,7 +134,7 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
-        handler.removeCallbacks(segmentRotation)
+        handler.removeCallbacks(silenceCheckRunnable)
         finalizeCurrentSegment()
 
         isRecording = false
@@ -152,8 +170,10 @@ class RecordingService : Service() {
     }
 
     private fun scheduleSegmentRotation() {
-        handler.removeCallbacks(segmentRotation)
-        handler.postDelayed(segmentRotation, MAX_SEGMENT_DURATION_MILLIS)
+        handler.removeCallbacks(silenceCheckRunnable)
+        segmentStartMillis = System.currentTimeMillis()
+        // MIN_SEGMENT_DURATION 後から無音チェックを開始する
+        handler.postDelayed(silenceCheckRunnable, MIN_SEGMENT_DURATION_MILLIS)
     }
 
     private fun finalizeCurrentSegment(): Boolean {
@@ -294,7 +314,14 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1001
         private const val AUDIO_BIT_RATE = 64_000
-        private const val MAX_SEGMENT_DURATION_MILLIS = 60L * 60L * 1_000L
+        /** 無音チェックを開始する最小録音時間（25分）*/
+        private const val MIN_SEGMENT_DURATION_MILLIS = 25L * 60L * 1_000L
+        /** 無音が検出できなかった場合の強制切り替え上限（35分）*/
+        private const val MAX_SEGMENT_DURATION_MILLIS = 35L * 60L * 1_000L
+        /** 無音とみなす振幅しきい値（0〜32767）*/
+        private const val SILENCE_AMPLITUDE_THRESHOLD = 100
+        /** 無音チェックの間隔（1秒）*/
+        private const val SILENCE_CHECK_INTERVAL_MILLIS = 1_000L
 
         @Volatile
         var isRecording: Boolean = false
