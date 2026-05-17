@@ -2,6 +2,7 @@ package dev.yuji.freerecorder
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import android.text.format.DateFormat
@@ -163,6 +165,15 @@ class MainActivity : Activity() {
             }
         }
         root.addView(settingsButton, matchWrap(topMargin = dp(8)))
+
+        val openRecordingsButton = Button(this).apply {
+            text = "音声ファイルの場所を開く"
+            setTextColor(Color.rgb(46, 125, 91))
+            setOnClickListener {
+                openRecordingsLocation()
+            }
+        }
+        root.addView(openRecordingsButton, matchWrap(topMargin = dp(8)))
 
         val listTitle = TextView(this).apply {
             text = "録音ファイル"
@@ -354,6 +365,39 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openRecordingsLocation() {
+        val documentId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "primary:${Environment.DIRECTORY_MUSIC}/Meeting Recorder"
+        } else {
+            "primary:Android/data/$packageName/files/${Environment.DIRECTORY_MUSIC}/Meeting Recorder"
+        }
+        val directoryUri = DocumentsContract.buildDocumentUri(
+            EXTERNAL_STORAGE_PROVIDER_AUTHORITY,
+            documentId
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(directoryUri, DocumentsContract.Document.MIME_TYPE_DIR)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            showRecordingsLocationFallback()
+        } catch (_: SecurityException) {
+            showRecordingsLocationFallback()
+        }
+    }
+
+    private fun showRecordingsLocationFallback() {
+        val location = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "Music > Meeting Recorder"
+        } else {
+            "Android > data > $packageName > files > Music > Meeting Recorder"
+        }
+        Toast.makeText(this, "ファイルアプリで $location を開いてください", Toast.LENGTH_LONG).show()
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private data class RecordingItem(
@@ -363,6 +407,7 @@ class MainActivity : Activity() {
     )
 
     companion object {
+        private const val EXTERNAL_STORAGE_PROVIDER_AUTHORITY = "com.android.externalstorage.documents"
         private const val REQUEST_RECORD_AUDIO = 10
         private const val REQUEST_POST_NOTIFICATIONS = 11
     }
